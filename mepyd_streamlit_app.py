@@ -867,7 +867,7 @@ with tabs[3]:
         hide_index=True,
     )
 
-    ods_priority = compute_service_priority_by_ods(filtered_df)
+    ods_priority = compute_ods_priorities(filtered_df)
     st.markdown("### ODS que requieren mayor atención pública")
     st.dataframe(
         ods_priority[
