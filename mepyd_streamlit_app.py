@@ -565,7 +565,7 @@ with tabs[0]:
     )
     st.plotly_chart(bar_inst, use_container_width=True)
 
-with tab2:
+with tabs[1]:
     st.markdown("### Rendimiento proyectado por proyecto")
     scatter = px.scatter(
         filtered_df,
@@ -643,7 +643,7 @@ with tab2:
     )
     st.dataframe(alert_table, use_container_width=True, hide_index=True)
 
-with tab3:
+with tabs[2]:
     st.markdown("### Inversión por región y por nivel estratégico")
     regional_investment = (
         filtered_df.groupby("REGION O PROVINCIA", as_index=False)
