@@ -681,55 +681,43 @@ with tabs[1]:
     st.dataframe(alert_table, use_container_width=True, hide_index=True)
 
 with tabs[2]:
-    st.markdown("### Inversión por región y por nivel estratégico")
-    regional_investment = (
-        filtered_df.groupby("REGION O PROVINCIA", as_index=False)
-        .agg(
-            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
-            Ejecucion=("TOTAL EJECUCION", "sum"),
-            Eficiencia=("% Ejecución Financiera", "mean"),
-        )
-        .sort_values("Presupuesto", ascending=False)
-    )
-    fig_region = px.bar(
-        regional_investment,
-        x="Presupuesto",
-        y="REGION O PROVINCIA",
-        orientation="h",
-        color="Eficiencia",
-        title="Inversión y eficiencia por Región/Provincia",
-        template="plotly_white",
-        color_continuous_scale="viridis",
-    )
-    st.plotly_chart(fig_region, use_container_width=True)
-
-    st.markdown("### Mapa ciudadano de la República Dominicana")
+    st.markdown("### Mapa de riesgo ciudadano y financiero por provincia/región")
     region_priority = compute_accountability_by_region(filtered_df)
-    map_df = (
-        filtered_df.groupby("REGION O PROVINCIA", as_index=False)
-        .agg(
-            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
-            Ejecucion=("TOTAL EJECUCION", "sum"),
-            Eficiencia=("% Ejecución Financiera", "mean"),
-            Proyectos=("SNIP", "nunique"),
-        )
+    region_priority["Clasificación de Riesgo"] = np.select(
+        [
+            region_priority["Índice Ciudadano"] < 20,
+            region_priority["Índice Ciudadano"] < 40,
+            region_priority["Índice Ciudadano"] < 60,
+        ],
+        ["Bajo", "Moderado", "Alto"],
+        default="Urgente",
     )
-    map_df = map_df.merge(
-        region_priority[["REGION O PROVINCIA", "Índice Ciudadano"]],
-        on="REGION O PROVINCIA",
-        how="left",
+    st.markdown(
+        "Este mapa prioriza las regiones donde la baja ejecución financiera y la brecha presupuestaria "
+        "se combinan con un alto riesgo de rendición. Las burbujas más grandes muestran el volumen de inversión "
+        "y el color refleja el riesgo ciudadano."
     )
+
+    metric_selector = st.selectbox(
+        "Métrica del mapa",
+        ["Índice Ciudadano", "Brecha", "Eficiencia", "Proyectos"],
+        index=0,
+        help="Selecciona la métrica que quieres visualizar en color sobre el mapa.",
+    )
+
+    map_df = region_priority.copy()
     map_df["coords"] = map_df["REGION O PROVINCIA"].apply(get_region_coordinates)
     map_df = map_df.dropna(subset=["coords"]).copy()
     if not map_df.empty:
         map_df["lon"] = map_df["coords"].apply(lambda c: c[0])
         map_df["lat"] = map_df["coords"].apply(lambda c: c[1])
+        size_field = "Brecha" if metric_selector != "Proyectos" else "Proyectos"
         figure_map = px.scatter_mapbox(
             map_df,
             lon="lon",
             lat="lat",
-            size="Presupuesto",
-            color="Índice Ciudadano",
+            size=size_field,
+            color=metric_selector,
             hover_name="REGION O PROVINCIA",
             hover_data={
                 "Presupuesto": ":,.0f",
@@ -737,6 +725,7 @@ with tabs[2]:
                 "Eficiencia": ":.1f",
                 "Proyectos": True,
                 "Índice Ciudadano": ":.1f",
+                "Riesgo de Rendición": ":.1f",
             },
             zoom=6,
             center={"lat": 18.8, "lon": -69.8},
@@ -744,8 +733,8 @@ with tabs[2]:
             template="plotly_white",
             mapbox_style="open-street-map",
             color_continuous_scale="thermal",
-            size_max=35,
-            height=580,
+            size_max=45,
+            height=620,
         )
         figure_map.update_layout(
             mapbox=dict(
@@ -756,33 +745,39 @@ with tabs[2]:
         )
         st.plotly_chart(figure_map, use_container_width=True)
 
-        st.markdown("#### Prioridad ciudadana por región")
-        st.dataframe(
-            region_priority[
-                ["REGION O PROVINCIA", "Eficiencia", "Brecha", "Proyectos", "Índice Ciudadano"]
-            ].rename(
-                columns={
-                    "REGION O PROVINCIA": "Región/Provincia",
-                    "Eficiencia": "Eficiencia (%)",
-                    "Brecha": "Brecha RD$",
-                    "Proyectos": "Proyectos",
-                    "Índice Ciudadano": "Índice Ciudadano",
-                }
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        urgent_regions = region_priority.head(3)
-        if not urgent_regions.empty:
-            st.markdown(
-                "#### Alertas de servicio público"
-                "\n" "Estas regiones tienen la mayor combinación de baja ejecución, brecha financiera y riesgo de rendición."
-            )
-            for _, row in urgent_regions.iterrows():
-                st.markdown(
-                    f"- **{row['REGION O PROVINCIA']}**: índice ciudadano {row['Índice Ciudadano']:.1f}, eficiencia {row['Eficiencia']:.1f}% y brecha RD$ {row['Brecha']:,.0f}."
+        top_metrics, top_table = st.columns((1, 1))
+        with top_metrics:
+            highest_risk = region_priority.iloc[0]
+            lowest_efficiency = region_priority.sort_values("Eficiencia").iloc[0]
+            highest_brecha = region_priority.sort_values("Brecha", ascending=False).iloc[0]
+            st.metric("Región más urgente", highest_risk["REGION O PROVINCIA"])
+            st.metric("Mayor brecha RD$", f"{highest_brecha['Brecha']:,.0f}")
+            st.metric("Peor eficiencia", f"{lowest_efficiency['Eficiencia']:.1f}%")
+        with top_table:
+            st.markdown("#### Regiones en foco")
+            st.dataframe(
+                region_priority[
+                    ["REGION O PROVINCIA", "Clasificación de Riesgo", "Eficiencia", "Brecha", "Índice Ciudadano"]
+                ]
+                .rename(
+                    columns={
+                        "REGION O PROVINCIA": "Región/Provincia",
+                        "Eficiencia": "Eficiencia (%)",
+                        "Brecha": "Brecha RD$",
+                        "Índice Ciudadano": "Índice Ciudadano",
+                    }
                 )
+                .head(8),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.markdown("#### Interpretación del riesgo ciudadano")
+        st.markdown(
+            "- Los valores altos del Índice Ciudadano indican regiones donde la ejecución financiera baja y la brecha presupuestaria generan mayor demanda de transparencia."
+            "\n" "- La clasificación de riesgo ayuda a priorizar la presión social y la exigencia de informes públicos."
+            "\n" "- Usa este panel para enfocar auditorías, solicitudes de acceso a la información y denuncias ciudadanas."
+        )
     else:
         st.info("No se encontraron coordenadas válidas para las regiones disponibles.")
 
