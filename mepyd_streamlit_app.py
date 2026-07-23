@@ -711,12 +711,13 @@ with tabs[2]:
     if not map_df.empty:
         map_df["lon"] = map_df["coords"].apply(lambda c: c[0])
         map_df["lat"] = map_df["coords"].apply(lambda c: c[1])
-        size_field = "Brecha" if metric_selector != "Proyectos" else "Proyectos"
-        figure_map = px.scatter_mapbox(
+        map_df["Presupuesto"] = map_df["Presupuesto"].fillna(0)
+        map_df["Brecha"] = map_df["Brecha"].fillna(0).clip(lower=0)
+        figure_map = px.scatter_geo(
             map_df,
             lon="lon",
             lat="lat",
-            size=size_field,
+            size="Presupuesto",
             color=metric_selector,
             hover_name="REGION O PROVINCIA",
             hover_data={
@@ -727,20 +728,27 @@ with tabs[2]:
                 "Índice Ciudadano": ":.1f",
                 "Riesgo de Rendición": ":.1f",
             },
-            zoom=6,
-            center={"lat": 18.8, "lon": -69.8},
+            projection="mercator",
+            scope="north america",
             title="Riesgo ciudadano y financiamiento por provincia/región",
             template="plotly_white",
-            mapbox_style="open-street-map",
-            color_continuous_scale="thermal",
+            color_continuous_scale="Viridis",
             size_max=45,
             height=620,
         )
+        figure_map.update_geos(
+            fitbounds="locations",
+            showland=True,
+            landcolor="#081f33",
+            oceancolor="#01101b",
+            showcountries=True,
+            countrycolor="#4d7091",
+            showcoastlines=True,
+            coastlinecolor="#5f7fa4",
+            lataxis_range=[17.4, 20.7],
+            lonaxis_range=[-72.7, -68.2],
+        )
         figure_map.update_layout(
-            mapbox=dict(
-                center={"lat": 18.8, "lon": -69.8},
-                zoom=6,
-            ),
             margin=dict(l=0, r=0, t=40, b=0),
         )
         st.plotly_chart(figure_map, use_container_width=True)
