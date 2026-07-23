@@ -11,6 +11,7 @@ import re
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -308,20 +309,68 @@ risk_status = np.select(
     default="Bajo riesgo",
 )
 filtered_df["Riesgo"] = risk_status
-high_risk_projects = (filtered_df["Riesgo"] == "Alto riesgo").sum()
-medium_risk_projects = (filtered_df["Riesgo"] == "Riesgo medio").sum()
-low_risk_projects = (filtered_df["Riesgo"] == "Bajo riesgo").sum()
+high_risk_projects = int((filtered_df["Riesgo"] == "Alto riesgo").sum())
+medium_risk_projects = int((filtered_df["Riesgo"] == "Riesgo medio").sum())
+low_risk_projects = int((filtered_df["Riesgo"] == "Bajo riesgo").sum())
 
 st.subheader("Resumen ejecutivo")
-metric_1, metric_2, metric_3, metric_4, metric_5 = st.columns([1.1, 1.1, 1.1, 1.1, 1.1])
-metric_1.metric("Presupuesto Total", f"RD$ {presupuesto_total:,.0f}")
-metric_2.metric("Ejecución Total", f"RD$ {ejecucion_total:,.0f}")
-metric_3.metric("Ejecución Global", f"{porcentaje_global:,.2f}%")
-metric_4.metric("Promedio Ejecutado", f"{promedio_financiero:,.2f}%")
-metric_5.metric("Avance Físico Medio", f"{promedio_fisico:,.2f}%")
-metric_1.metric("Proyectos Alto Riesgo", f"{high_risk_projects:,}")
-metric_2.metric("Proyectos Riesgo Medio", f"{medium_risk_projects:,}")
-metric_3.metric("Proyectos Bajo Riesgo", f"{low_risk_projects:,}")
+metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+metric_col1.metric("Presupuesto Total", f"RD$ {presupuesto_total:,.0f}")
+metric_col2.metric("Ejecución Total", f"RD$ {ejecucion_total:,.0f}")
+metric_col3.metric("Ejecución Global", f"{porcentaje_global:,.2f}%")
+metric_col4.metric("Proyectos", f"{cantidad_proyectos:,}")
+
+risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
+risk_col1.metric("Promedio Ejecutado", f"{promedio_financiero:,.2f}%")
+risk_col2.metric("Avance Físico Medio", f"{promedio_fisico:,.2f}%")
+risk_col3.metric("Alto riesgo", f"{high_risk_projects:,}")
+risk_col4.metric("Riesgo medio", f"{medium_risk_projects:,}")
+
+st.markdown("---")
+
+risk_summary = (
+    filtered_df["Riesgo"].value_counts(normalize=True).rename_axis("Riesgo").reset_index(name="Porcentaje")
+)
+compliance_summary = (
+    filtered_df.groupby("SITUACION PRESUPUESTARIA", as_index=False)
+    .agg(Eficiencia=("% Ejecución Financiera", "mean"))
+    .sort_values("Eficiencia", ascending=False)
+)
+
+col_pie, col_bar = st.columns(2)
+with col_pie:
+    if not risk_summary.empty:
+        fig_risk = px.pie(
+            risk_summary,
+            names="Riesgo",
+            values="Porcentaje",
+            title="Distribución de riesgo de proyectos",
+            hole=0.45,
+            template="plotly_white",
+        )
+        fig_risk.update_traces(textposition="inside", textinfo="percent+label")
+        st.plotly_chart(fig_risk, use_container_width=True)
+    else:
+        st.info("No hay datos de riesgo para mostrar.")
+
+with col_bar:
+    if not compliance_summary.empty:
+        fig_compliance = px.bar(
+            compliance_summary,
+            x="Eficiencia",
+            y="SITUACION PRESUPUESTARIA",
+            orientation="h",
+            color="Eficiencia",
+            title="Eficiencia financiera por situación presupuestaria",
+            text="Eficiencia",
+            template="plotly_white",
+            color_continuous_scale="Viridis",
+        )
+        fig_compliance.update_traces(texttemplate="%{text:.1f}%")
+        fig_compliance.update_layout(xaxis_title="% Ejecución Financiera", showlegend=False)
+        st.plotly_chart(fig_compliance, use_container_width=True)
+    else:
+        st.info("No hay datos de situación presupuestaria para mostrar.")
 
 st.markdown("---")
 
@@ -473,6 +522,30 @@ with tab2:
         ],
     )
     st.plotly_chart(scatter, use_container_width=True)
+
+    compliance_score = float(filtered_df["% Ejecución Financiera"].mean(skipna=True) or 0.0)
+    fig_gauge = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=compliance_score,
+        domain={"x": [0, 1], "y": [0, 1]},
+        title={"text": "Cumplimiento Financiero Global"},
+        delta={"reference": 80, "increasing": {"color": "green"}},
+        gauge={
+            "axis": {"range": [0, 100]},
+            "bar": {"color": "#1f77b4"},
+            "steps": [
+                {"range": [0, 60], "color": "#ff6961"},
+                {"range": [60, 80], "color": "#f8d568"},
+                {"range": [80, 100], "color": "#77dd77"},
+            ],
+            "threshold": {
+                "line": {"color": "red", "width": 4},
+                "thickness": 0.75,
+                "value": 80,
+            },
+        },
+    ))
+    st.plotly_chart(fig_gauge, use_container_width=True)
 
     st.markdown("### Proyectos con mayor brecha y baja ejecución")
     alert_table = (
