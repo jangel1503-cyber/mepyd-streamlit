@@ -8,6 +8,7 @@ pip install streamlit pandas plotly requests openpyxl
 from io import BytesIO, StringIO
 import re
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import requests
@@ -298,13 +299,29 @@ promedio_fisico = float(filtered_df["PORCENTAJE"].mean(skipna=True) or 0.0)
 
 situacion_counts = filtered_df["SITUACION PRESUPUESTARIA"].value_counts().head(5)
 
+risk_status = np.select(
+    [
+        (filtered_df["% Ejecución Financiera"] < 70) & (filtered_df["PORCENTAJE"] < 70),
+        (filtered_df["% Ejecución Financiera"] < 80) | (filtered_df["PORCENTAJE"] < 80),
+    ],
+    ["Alto riesgo", "Riesgo medio"],
+    default="Bajo riesgo",
+)
+filtered_df["Riesgo"] = risk_status
+high_risk_projects = (filtered_df["Riesgo"] == "Alto riesgo").sum()
+medium_risk_projects = (filtered_df["Riesgo"] == "Riesgo medio").sum()
+low_risk_projects = (filtered_df["Riesgo"] == "Bajo riesgo").sum()
+
 st.subheader("Resumen ejecutivo")
-metric_1, metric_2, metric_3, metric_4, metric_5 = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
+metric_1, metric_2, metric_3, metric_4, metric_5 = st.columns([1.1, 1.1, 1.1, 1.1, 1.1])
 metric_1.metric("Presupuesto Total", f"RD$ {presupuesto_total:,.0f}")
 metric_2.metric("Ejecución Total", f"RD$ {ejecucion_total:,.0f}")
 metric_3.metric("Ejecución Global", f"{porcentaje_global:,.2f}%")
 metric_4.metric("Promedio Ejecutado", f"{promedio_financiero:,.2f}%")
 metric_5.metric("Avance Físico Medio", f"{promedio_fisico:,.2f}%")
+metric_1.metric("Proyectos Alto Riesgo", f"{high_risk_projects:,}")
+metric_2.metric("Proyectos Riesgo Medio", f"{medium_risk_projects:,}")
+metric_3.metric("Proyectos Bajo Riesgo", f"{low_risk_projects:,}")
 
 st.markdown("---")
 
@@ -351,6 +368,29 @@ with tabs[0]:
     )
     line_fig.update_layout(yaxis_title="RD$", legend_title="Serie")
     st.plotly_chart(line_fig, use_container_width=True)
+
+    st.markdown("### Estructura de proyectos por tipología y función")
+    category_summary = (
+        filtered_df.groupby(["TIPOLOGIA DE PROYECTO", "FUNCION"], as_index=False)
+        .agg(
+            Proyectos=("SNIP", "nunique"),
+            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
+        )
+        .sort_values("Presupuesto", ascending=False)
+    )
+    if not category_summary.empty:
+        sunburst = px.sunburst(
+            category_summary,
+            path=["TIPOLOGIA DE PROYECTO", "FUNCION"],
+            values="Presupuesto",
+            color="Proyectos",
+            color_continuous_scale="Blues",
+            title="Estructura de inversión por tipología de proyecto y función",
+            template="plotly_white",
+        )
+        st.plotly_chart(sunburst, use_container_width=True)
+    else:
+        st.info("No hay datos suficientes para generar la visualización de tipologías.")
 
     st.markdown("### Composición del financiamiento por fuente")
     source_summary = (
@@ -413,7 +453,7 @@ with tab2:
         x="PORCENTAJE",
         y="% Ejecución Financiera",
         size="TOTAL PRESUPUESTO VIGENTE",
-        color="REGION O PROVINCIA",
+        color="Riesgo",
         hover_name="NOMBRE PROYECTO",
         hover_data={
             "SNIP": True,
@@ -424,7 +464,14 @@ with tab2:
         title="Proyectos: avance físico vs ejecución financiera",
         template="plotly_white",
     )
-    scatter.update_layout(xaxis_title="% Avance Físico", yaxis_title="% Ejecución Financiera")
+    scatter.update_layout(
+        xaxis_title="% Avance Físico",
+        yaxis_title="% Ejecución Financiera",
+        shapes=[
+            dict(type="line", x0=80, x1=80, y0=0, y1=100, line=dict(color="gray", dash="dash")),
+            dict(type="line", x0=0, x1=100, y0=80, y1=80, line=dict(color="gray", dash="dash")),
+        ],
+    )
     st.plotly_chart(scatter, use_container_width=True)
 
     st.markdown("### Proyectos con mayor brecha y baja ejecución")
@@ -475,6 +522,25 @@ with tab3:
         color_continuous_scale="viridis",
     )
     st.plotly_chart(fig_region, use_container_width=True)
+
+    st.markdown("### Inversión por ODS")
+    ods_summary = (
+        filtered_df.groupby("NOMBRE CORTO ODS", as_index=False)
+        .agg(Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"), Ejecucion=("TOTAL EJECUCION", "sum"))
+        .sort_values("Presupuesto", ascending=False)
+    )
+    if not ods_summary.empty:
+        donut = px.pie(
+            ods_summary,
+            values="Presupuesto",
+            names="NOMBRE CORTO ODS",
+            title="Distribución de presupuesto por ODS",
+            hole=0.45,
+            template="plotly_white",
+        )
+        st.plotly_chart(donut, use_container_width=True)
+    else:
+        st.info("No hay datos suficientes para generar el donut de ODS.")
 
     st.markdown("### Alineación estratégica: ODS y Eje END")
     treemap_data = (
