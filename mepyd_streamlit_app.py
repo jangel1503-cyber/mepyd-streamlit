@@ -22,28 +22,45 @@ st.markdown(
     """
     <style>
     .stApp {
-        background: linear-gradient(135deg, #f7fbff 0%, #eef4fb 100%);
+        background: radial-gradient(circle at top left, #081f33 0%, #061623 35%, #020710 100%);
+        color: #e6f2ff;
     }
     .block-container {
         padding-top: 2rem;
         padding-bottom: 2rem;
+        background: rgba(5, 17, 36, 0.85);
+        border-radius: 24px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.06);
     }
-    .stTitle {
-        color: #0f4c81;
-        font-weight: 700;
+    .st-bf {
+        color: #e6f2ff;
     }
-    .stCaption {
-        color: #365f7a;
+    .stTextInput label, .stSelectbox label, .stMultiSelect label, .stButton button {
+        color: #b8d4ff !important;
     }
-    div[data-testid="stSidebar"] {
-        background-color: #0f4c81;
-        color: white;
+    .stButton>button {
+        background-color: #0a4d8c !important;
+        color: white !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
     }
-    div[data-testid="stSidebar"] .stTextInput > label,
-    div[data-testid="stSidebar"] .stSelectbox > label,
-    div[data-testid="stSidebar"] .stMultiSelect > label,
-    div[data-testid="stSidebar"] .stButton > button {
-        color: white;
+    .stDownloadButton>button {
+        background-color: #0a4d8c !important;
+        color: white !important;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+    }
+    .css-1d391kg .stExpanderHeader {
+        background: rgba(255,255,255,0.04);
+        border-radius: 16px;
+    }
+    .css-1d391kg .stExpanderContent {
+        background: rgba(255,255,255,0.03);
+        border-radius: 16px;
+    }
+    .stMetric {
+        background: rgba(255,255,255,0.05);
+        border-radius: 18px;
+        padding: 1rem;
     }
     </style>
     """,
@@ -92,6 +109,45 @@ FINANCIAL_COLUMNS = [
     "EJECUCION DONACIONES",
     "TOTAL EJECUCION",
 ]
+
+PROVINCE_COORDINATES = {
+    "santo domingo": (-69.9312, 18.4861),
+    "distrito nacional": (-69.9284, 18.4740),
+    "santiago": (-70.7079, 19.4550),
+    "la vega": (-70.6064, 19.2109),
+    "puerto plata": (-70.6878, 19.7928),
+    "san cristobal": (-70.4445, 18.4165),
+    "la altagracia": (-68.5456, 18.4308),
+    "san pedro de macoris": (-69.2963, 18.4531),
+    "monte plata": (-69.0167, 18.8133),
+    "peravia": (-70.2783, 18.4509),
+    "san juan": (-71.2519, 18.4556),
+    "azua": (-70.7321, 18.4569),
+    "montecristi": (-71.6333, 19.8420),
+    "sanchez ramirez": (-70.2436, 19.0412),
+    "barahona": (-71.1447, 18.2108),
+    "duarte": (-69.3218, 19.1584),
+    "maría trinidad sánchez": (-69.4034, 19.3898),
+    "maría trinidad sanchez": (-69.4034, 19.3898),
+    "samaná": (-69.3306, 19.2226),
+    "puerto plata": (-70.6878, 19.7928),
+    "peravia": (-70.2783, 18.4509),
+    "santiago rodriquez": (-71.1328, 19.3994),
+    "santiago rodriguez": (-71.1328, 19.3994),
+    "valverde": (-71.2570, 19.6770),
+    "hato mayor": (-69.2814, 18.7650),
+    "el seibo": (-68.7074, 18.7081),
+    "monseñor nouel": (-70.0823, 18.8319),
+    "monseñor nouel": (-70.0823, 18.8319),
+    "independencia": (-71.8500, 18.4995),
+    "pedernales": (-71.7770, 17.9690),
+    "bahoruco": (-71.5000, 18.3667),
+    "elias piña": (-71.7667, 18.5667),
+    "damajabon": (-71.6833, 19.5333),
+    "dajaabon": (-71.6833, 19.5333),
+    "espallat": (-70.2460, 19.3447),
+    "espaillat": (-70.2460, 19.3447),
+}
 
 
 def normalize_column_name(value: str) -> str:
@@ -221,6 +277,22 @@ def clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
     return cleaned
 
 
+def get_region_coordinates(region: str):
+    if not isinstance(region, str) or not region.strip():
+        return None
+    key = region.lower().strip()
+    key = key.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+    key = key.replace("ñ", "n").replace("\u00f1", "n").replace("\u00e1", "a").replace("\u00e9", "e")
+    key = key.replace("\u00ed", "i").replace("\u00f3", "o").replace("\u00fa", "u")
+    key = key.replace("provincia ", "").replace("region ", "").strip()
+    if key in PROVINCE_COORDINATES:
+        return PROVINCE_COORDINATES[key]
+    for name, coords in PROVINCE_COORDINATES.items():
+        if name in key or key in name:
+            return coords
+    return None
+
+
 def load_dataset(uploaded_file=None, force_refresh: bool = False) -> pd.DataFrame:
     if uploaded_file is not None:
         raw_df = load_data_from_upload(uploaded_file)
@@ -232,27 +304,26 @@ def load_dataset(uploaded_file=None, force_refresh: bool = False) -> pd.DataFram
 
 st.markdown(
     """
-    <div style="background-color:#0f4c81; padding: 1.2rem 1.4rem; border-radius: 14px; margin-bottom: 1rem;">
-    <h1 style="color:white; margin:0; font-size:2rem;">Análisis de Ejecución de Proyectos de Inversión - MEPyD</h1>
-    <p style="color:#dcecfb; margin:0.35rem 0 0 0;">Dataset oficial del Ministerio de Economía, Planificación y Desarrollo, periodo 2018-2024</p>
+    <div style="background: linear-gradient(135deg, rgba(5, 26, 58, 0.96), rgba(6, 20, 47, 0.96)); padding: 1.6rem 1.8rem; border-radius: 24px; margin-bottom: 1rem; border: 1px solid rgba(255,255,255,0.08);">
+    <h1 style="color:#f7fbff; margin:0; font-size:2.2rem; letter-spacing:0.6px; font-weight:800;">MEPyD: Dashboard de Ejecución de Proyectos</h1>
+    <p style="color:#c9dbf2; margin:0.65rem 0 0 0; font-size:1rem; line-height:1.5; max-width:780px;">Análisis de inversiones 2018-2024 basado en datos abiertos de la República Dominicana. Publicado por el Ministerio de Economía, Planificación y Desarrollo (MEPyD).</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 with st.sidebar:
-    st.header("Fuente de datos")
-    st.write("Descarga automática desde la fuente oficial o sube un archivo manualmente.")
-    uploaded_file = st.file_uploader("Subir archivo CSV/XLSX manualmente", type=["csv", "xlsx", "xls"])
+    st.header("Datos")
+    st.write("Carga el dataset oficial desde el portal de datos abiertos de RD o sube un archivo manualmente.")
+    uploaded_file = st.file_uploader("Subir CSV/XLSX manualmente", type=["csv", "xlsx", "xls"])
 
-    if st.button("Recargar / Refrescar Datos desde MEPyD", use_container_width=True):
+    if st.button("Recargar datos", use_container_width=True):
         st.cache_data.clear()
         st.session_state["force_refresh"] = True
         st.rerun()
 
     st.markdown("---")
-    st.caption("Fuentes oficiales:")
-    st.caption(CSV_URL)
+    st.caption("Datos abiertos RD · Ministerio de Economía, Planificación y Desarrollo")
 
 force_refresh = st.session_state.pop("force_refresh", False)
 
@@ -266,9 +337,8 @@ if df.empty:
     st.warning("El dataset cargado está vacío.")
     st.stop()
 
-# Filtros interactivos
-with st.sidebar:
-    st.header("Filtros")
+# Filtros interactivos ocultos en un expander
+with st.expander("Opciones de filtrado avanzadas", expanded=False):
     period_options = sorted([int(x) for x in df["PERIODO"].dropna().unique().tolist()])
     selected_periods = st.multiselect("PERIODO", options=period_options, default=period_options)
 
@@ -595,6 +665,45 @@ with tab3:
         color_continuous_scale="viridis",
     )
     st.plotly_chart(fig_region, use_container_width=True)
+
+    st.markdown("### Mapa interactivo de la República Dominicana")
+    map_df = (
+        filtered_df.groupby("REGION O PROVINCIA", as_index=False)
+        .agg(
+            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
+            Ejecucion=("TOTAL EJECUCION", "sum"),
+            Eficiencia=("% Ejecución Financiera", "mean"),
+            Proyectos=("SNIP", "nunique"),
+        )
+    )
+    map_df["coords"] = map_df["REGION O PROVINCIA"].apply(get_region_coordinates)
+    map_df = map_df.dropna(subset=["coords"]).copy()
+    if not map_df.empty:
+        map_df["lon"] = map_df["coords"].apply(lambda c: c[0])
+        map_df["lat"] = map_df["coords"].apply(lambda c: c[1])
+        figure_map = px.scatter_geo(
+            map_df,
+            lon="lon",
+            lat="lat",
+            size="Presupuesto",
+            color="Eficiencia",
+            hover_name="REGION O PROVINCIA",
+            hover_data={
+                "Presupuesto": ":,.0f",
+                "Ejecucion": ":,.0f",
+                "Eficiencia": ":.1f",
+                "Proyectos": True,
+            },
+            scope="north america",
+            projection="natural earth",
+            title="Elementos de inversión por provincia/región",
+            template="plotly_white",
+            color_continuous_scale="thermal",
+        )
+        figure_map.update_geos(fitbounds="locations", visible=False)
+        st.plotly_chart(figure_map, use_container_width=True)
+    else:
+        st.info("No se encontraron coordenadas válidas para las regiones disponibles.")
 
     st.markdown("### Inversión por ODS")
     ods_summary = (
