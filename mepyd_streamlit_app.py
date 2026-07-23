@@ -277,6 +277,43 @@ def clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
     return cleaned
 
 
+def compute_accountability_by_region(df: pd.DataFrame) -> pd.DataFrame:
+    region_df = (
+        df.groupby("REGION O PROVINCIA", as_index=False)
+        .agg(
+            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
+            Ejecucion=("TOTAL EJECUCION", "sum"),
+            Eficiencia=("% Ejecución Financiera", "mean"),
+            Brecha=("Subejecución / Brecha", "sum"),
+            Proyectos=("SNIP", "nunique"),
+        )
+    )
+    region_df["Brecha"] = region_df["Brecha"].fillna(0)
+    region_df["Eficiencia"] = region_df["Eficiencia"].fillna(0)
+    region_df["Riesgo de Rendición"] = (
+        (100 - region_df["Eficiencia"]) * (region_df["Brecha"] / region_df["Presupuesto"].replace({0: np.nan}))
+    ).fillna(0)
+    region_df["Índice Ciudadano"] = (100 - region_df["Eficiencia"]) + region_df["Riesgo de Rendición"]
+    return region_df.sort_values(["Índice Ciudadano", "Brecha"], ascending=[False, False])
+
+
+def compute_ods_priorities(df: pd.DataFrame) -> pd.DataFrame:
+    ods_df = (
+        df.groupby("NOMBRE CORTO ODS", as_index=False)
+        .agg(
+            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
+            Ejecucion=("TOTAL EJECUCION", "sum"),
+            Eficiencia=("% Ejecución Financiera", "mean"),
+            Proyectos=("SNIP", "nunique"),
+        )
+    )
+    ods_df["Brecha"] = ods_df["Presupuesto"] - ods_df["Ejecucion"]
+    ods_df["Urgencia"] = (
+        ods_df["Brecha"] * (100 - ods_df["Eficiencia"]) / ods_df["Presupuesto"].replace({0: np.nan})
+    ).fillna(0)
+    return ods_df.sort_values("Urgencia", ascending=False)
+
+
 def get_region_coordinates(region: str):
     if not isinstance(region, str) or not region.strip():
         return None
@@ -305,8 +342,8 @@ def load_dataset(uploaded_file=None, force_refresh: bool = False) -> pd.DataFram
 st.markdown(
     """
     <div style="background: linear-gradient(135deg, rgba(5, 26, 58, 0.96), rgba(6, 20, 47, 0.96)); padding: 1.6rem 1.8rem; border-radius: 24px; margin-bottom: 1rem; border: 1px solid rgba(255,255,255,0.08);">
-    <h1 style="color:#f7fbff; margin:0; font-size:2.2rem; letter-spacing:0.6px; font-weight:800;">MEPyD: Dashboard de Ejecución de Proyectos</h1>
-    <p style="color:#c9dbf2; margin:0.65rem 0 0 0; font-size:1rem; line-height:1.5; max-width:780px;">Análisis de inversiones 2018-2024 basado en datos abiertos de la República Dominicana. Publicado por el Ministerio de Economía, Planificación y Desarrollo (MEPyD).</p>
+    <h1 style="color:#f7fbff; margin:0; font-size:2.2rem; letter-spacing:0.6px; font-weight:800;">MEPyD Ciudadano: Fiscalización y Rendición</h1>
+    <p style="color:#c9dbf2; margin:0.65rem 0 0 0; font-size:1rem; line-height:1.5; max-width:780px;">Herramienta para convertir datos de inversión pública en alertas de servicio, prioridades ciudadanas y demandas de transparencia en la República Dominicana.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -464,7 +501,7 @@ with st.expander("Visión urgente del desempeño", expanded=True):
 st.markdown("---")
 
 # Tablero principal con análisis profundo
-tabs = st.tabs(["Dashboard General", "Alertas de Desempeño", "Inversión Territorial", "Explorador y Exportación"])
+tabs = st.tabs(["Análisis Estratégico", "Alertas y Riesgos", "Territorio y Servicios", "Plan de Acción Ciudadana"])
 
 with tabs[0]:
     st.markdown("### Rendimiento por período y financiamiento")
@@ -666,7 +703,8 @@ with tabs[2]:
     )
     st.plotly_chart(fig_region, use_container_width=True)
 
-    st.markdown("### Mapa interactivo de la República Dominicana")
+    st.markdown("### Mapa ciudadano de la República Dominicana")
+    region_priority = compute_accountability_by_region(filtered_df)
     map_df = (
         filtered_df.groupby("REGION O PROVINCIA", as_index=False)
         .agg(
@@ -676,32 +714,75 @@ with tabs[2]:
             Proyectos=("SNIP", "nunique"),
         )
     )
+    map_df = map_df.merge(
+        region_priority[["REGION O PROVINCIA", "Índice Ciudadano"]],
+        on="REGION O PROVINCIA",
+        how="left",
+    )
     map_df["coords"] = map_df["REGION O PROVINCIA"].apply(get_region_coordinates)
     map_df = map_df.dropna(subset=["coords"]).copy()
     if not map_df.empty:
         map_df["lon"] = map_df["coords"].apply(lambda c: c[0])
         map_df["lat"] = map_df["coords"].apply(lambda c: c[1])
-        figure_map = px.scatter_geo(
+        figure_map = px.scatter_mapbox(
             map_df,
             lon="lon",
             lat="lat",
             size="Presupuesto",
-            color="Eficiencia",
+            color="Índice Ciudadano",
             hover_name="REGION O PROVINCIA",
             hover_data={
                 "Presupuesto": ":,.0f",
                 "Ejecucion": ":,.0f",
                 "Eficiencia": ":.1f",
                 "Proyectos": True,
+                "Índice Ciudadano": ":.1f",
             },
-            scope="north america",
-            projection="natural earth",
-            title="Elementos de inversión por provincia/región",
+            zoom=6,
+            center={"lat": 18.8, "lon": -69.8},
+            title="Riesgo ciudadano y financiamiento por provincia/región",
             template="plotly_white",
+            mapbox_style="open-street-map",
             color_continuous_scale="thermal",
+            size_max=35,
+            height=580,
         )
-        figure_map.update_geos(fitbounds="locations", visible=False)
+        figure_map.update_layout(
+            mapbox=dict(
+                center={"lat": 18.8, "lon": -69.8},
+                zoom=6,
+            ),
+            margin=dict(l=0, r=0, t=40, b=0),
+        )
         st.plotly_chart(figure_map, use_container_width=True)
+
+        st.markdown("#### Prioridad ciudadana por región")
+        st.dataframe(
+            region_priority[
+                ["REGION O PROVINCIA", "Eficiencia", "Brecha", "Proyectos", "Índice Ciudadano"]
+            ].rename(
+                columns={
+                    "REGION O PROVINCIA": "Región/Provincia",
+                    "Eficiencia": "Eficiencia (%)",
+                    "Brecha": "Brecha RD$",
+                    "Proyectos": "Proyectos",
+                    "Índice Ciudadano": "Índice Ciudadano",
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        urgent_regions = region_priority.head(3)
+        if not urgent_regions.empty:
+            st.markdown(
+                "#### Alertas de servicio público"
+                "\n" "Estas regiones tienen la mayor combinación de baja ejecución, brecha financiera y riesgo de rendición."
+            )
+            for _, row in urgent_regions.iterrows():
+                st.markdown(
+                    f"- **{row['REGION O PROVINCIA']}**: índice ciudadano {row['Índice Ciudadano']:.1f}, eficiencia {row['Eficiencia']:.1f}% y brecha RD$ {row['Brecha']:,.0f}."
+                )
     else:
         st.info("No se encontraron coordenadas válidas para las regiones disponibles.")
 
@@ -742,36 +823,106 @@ with tabs[2]:
     st.plotly_chart(fig_treemap, use_container_width=True)
 
 with tabs[3]:
-    st.subheader("Explorador abierto")
-    search_text = st.text_input("Buscar por nombre de proyecto o SNIP")
-    explorer_df = filtered_df.copy()
-
-    if search_text:
-        explorer_df = explorer_df[
-            explorer_df["NOMBRE PROYECTO"].astype(str).str.contains(search_text, case=False, na=False)
-            | explorer_df["SNIP"].astype(str).str.contains(search_text, case=False, na=False)
-        ]
-
-    explorer_df = explorer_df[
+    st.subheader("Plan de Acción Ciudadana")
+    action_focus = st.selectbox(
+        "Enfoque de acción",
         [
-            "PERIODO",
-            "SNIP",
-            "NOMBRE PROYECTO",
-            "INSTITUCION EJECUTORA",
-            "REGION O PROVINCIA",
-            "NOMBRE CORTO ODS",
-            "EJE END",
-            "TOTAL PRESUPUESTO VIGENTE",
-            "TOTAL EJECUCION",
-            "% Ejecución Financiera",
-            "PORCENTAJE",
-            "Subejecución / Brecha",
-        ]
-    ]
+            "Transparencia y rendición de cuentas",
+            "Vigilancia de servicios básicos",
+            "Seguimiento de ODS prioritarios",
+        ],
+    )
 
-    st.dataframe(explorer_df, use_container_width=True, hide_index=True)
+    st.markdown(
+        "Este panel está diseñado para que organizaciones civiles, comunidades y medios identifiquen"
+        " proyectos y regiones donde la inversión pública necesita más vigilancia y explicación."
+    )
+
+    priority_projects = (
+        filtered_df.assign(
+            Brecha=filtered_df["Subejecución / Brecha"],
+            Eficiencia=filtered_df["% Ejecución Financiera"],
+        )
+        .query("Eficiencia < 75")
+        .sort_values(["Brecha", "Eficiencia"], ascending=[False, True])
+        .head(10)
+    )
+
+    st.markdown("### Proyectos críticos para seguimiento ciudadano")
+    st.dataframe(
+        priority_projects[
+            [
+                "PERIODO",
+                "SNIP",
+                "NOMBRE PROYECTO",
+                "INSTITUCION EJECUTORA",
+                "REGION O PROVINCIA",
+                "TOTAL PRESUPUESTO VIGENTE",
+                "TOTAL EJECUCION",
+                "% Ejecución Financiera",
+                "Subejecución / Brecha",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    ods_priority = compute_service_priority_by_ods(filtered_df)
+    st.markdown("### ODS que requieren mayor atención pública")
+    st.dataframe(
+        ods_priority[
+            ["NOMBRE CORTO ODS", "Presupuesto", "Ejecucion", "Eficiencia", "Brecha", "Urgencia"]
+        ]
+        .rename(
+            columns={
+                "NOMBRE CORTO ODS": "ODS",
+                "Presupuesto": "Presupuesto RD$",
+                "Ejecucion": "Ejecución RD$",
+                "Eficiencia": "Eficiencia (%)",
+                "Brecha": "Brecha RD$",
+                "Urgencia": "Urgencia",
+            }
+        )
+        .head(6),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    if action_focus == "Transparencia y rendición de cuentas":
+        st.markdown(
+            "#### Carta de petición ciudadana"
+            "\n" "Use esta propuesta como base para solicitar información a instituciones y gobiernos locales."
+        )
+        message = (
+            "Solicito información detallada sobre los proyectos con baja ejecución y alta brecha financiera, "
+            "especialmente los listados en esta herramienta para la región seleccionada. "
+            "Solicito el acceso a cronogramas, avances físicos, montos ejecutados, contrataciones y uso de recursos."
+        )
+    elif action_focus == "Vigilancia de servicios básicos":
+        st.markdown(
+            "#### Mensaje para comunidades"
+            "\n" "Identifique los proyectos de su región relacionados con agua, salud o educación y comparta esta información "
+            "para exigir informes periódicos sobre resultados."
+        )
+        message = (
+            "Es urgente que las autoridades locales informen el estado real de los proyectos que afectan el servicio "
+            "de agua potable, salud y movilidad en nuestra comunidad. Exigimos transparencia en ejecución y entregables."
+        )
+    else:
+        st.markdown(
+            "#### Monitoreo de ODS"
+            "\n" "Use estos datos para vincular la inversión pública con los Objetivos de Desarrollo Sostenible y monitorear "
+            "la entrega de valor social en su región."
+        )
+        message = (
+            "Solicito que se priorice la ejecución de proyectos alineados con los ODS más urgentes, y que se publique "
+            "un informe de resultados sobre el impacto social y ambiental esperado y real."
+        )
+
+    st.text_area("Texto de acción ciudadana", value=message, height=180)
 
     csv_buffer = BytesIO()
+    explorer_df = filtered_df.copy()
     explorer_df.to_csv(csv_buffer, index=False)
     xlsx_buffer = BytesIO()
     explorer_df.to_excel(xlsx_buffer, index=False, engine="openpyxl")
@@ -779,15 +930,15 @@ with tabs[3]:
     col_csv, col_excel = st.columns(2)
     with col_csv:
         st.download_button(
-            label="Exportar a CSV",
+            label="Exportar datos completos",
             data=csv_buffer.getvalue(),
-            file_name="mepyd_proyectos_filtrados.csv",
+            file_name="mepyd_proyectos_accion_ciudadana.csv",
             mime="text/csv",
         )
     with col_excel:
         st.download_button(
-            label="Exportar a Excel",
+            label="Exportar datos completos a Excel",
             data=xlsx_buffer.getvalue(),
-            file_name="mepyd_proyectos_filtrados.xlsx",
+            file_name="mepyd_proyectos_accion_ciudadana.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
