@@ -288,117 +288,212 @@ filtered_df = df[
 
 filtered_df = filtered_df.dropna(subset=["TOTAL PRESUPUESTO VIGENTE", "TOTAL EJECUCION"], how="all")
 
-st.subheader("Resumen ejecutivo")
-summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
-
+# Métricas avanzadas de desempeño
 presupuesto_total = float(filtered_df["TOTAL PRESUPUESTO VIGENTE"].sum())
 ejecucion_total = float(filtered_df["TOTAL EJECUCION"].sum())
 porcentaje_global = (ejecucion_total / presupuesto_total * 100) if presupuesto_total else 0.0
 cantidad_proyectos = int(filtered_df.shape[0])
+promedio_financiero = float(filtered_df["% Ejecución Financiera"].mean(skipna=True) or 0.0)
+promedio_fisico = float(filtered_df["PORCENTAJE"].mean(skipna=True) or 0.0)
 
-summary_col1.metric("Monto Total Presupuestado", f"RD$ {presupuesto_total:,.0f}")
-summary_col2.metric("Monto Total Ejecutado", f"RD$ {ejecucion_total:,.0f}")
-summary_col3.metric("% Global de Ejecución", f"{porcentaje_global:,.2f}%")
-summary_col4.metric("Cantidad de Proyectos", f"{cantidad_proyectos:,}")
+situacion_counts = filtered_df["SITUACION PRESUPUESTARIA"].value_counts().head(5)
+
+st.subheader("Resumen ejecutivo")
+metric_1, metric_2, metric_3, metric_4, metric_5 = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
+metric_1.metric("Presupuesto Total", f"RD$ {presupuesto_total:,.0f}")
+metric_2.metric("Ejecución Total", f"RD$ {ejecucion_total:,.0f}")
+metric_3.metric("Ejecución Global", f"{porcentaje_global:,.2f}%")
+metric_4.metric("Promedio Ejecutado", f"{promedio_financiero:,.2f}%")
+metric_5.metric("Avance Físico Medio", f"{promedio_fisico:,.2f}%")
 
 st.markdown("---")
 
-with st.expander("Insights inteligentes", expanded=True):
-    top_gap = filtered_df.sort_values("Subejecución / Brecha", ascending=False).head(3)
-    if not top_gap.empty:
-        st.write("- Proyectos con mayor brecha presupuestaria: ")
-        for _, row in top_gap[["NOMBRE PROYECTO", "Subejecución / Brecha", "% Ejecución Financiera"]].iterrows():
-            st.write(f"  - {row['NOMBRE PROYECTO']}: brecha RD$ {row['Subejecución / Brecha']:,.0f} y ejecución de {row['% Ejecución Financiera']:.1f}%")
-    else:
-        st.write("- No hay datos suficientes para construir insights adicionales.")
+with st.expander("Visión urgente del desempeño", expanded=True):
+    col_a, col_b = st.columns((1, 2))
+    with col_a:
+        st.markdown("**Situación presupuestaria más común**")
+        st.table(situacion_counts.rename_axis("Situación").reset_index(name="Proyectos"))
 
-    worst_projects = filtered_df.sort_values("% Ejecución Financiera", ascending=True).head(3)
-    if not worst_projects.empty:
-        st.write("- Proyectos con menor ejecución financiera: ")
-        for _, row in worst_projects[["NOMBRE PROYECTO", "% Ejecución Financiera"]].iterrows():
-            st.write(f"  - {row['NOMBRE PROYECTO']}: {row['% Ejecución Financiera']:.1f}%")
+    with col_b:
+        top_underperformers = (
+            filtered_df.assign(Brecha=filtered_df["Subejecución / Brecha"])
+            .query("`% Ejecución Financiera` < 60")
+            .sort_values(["Subejecución / Brecha", "% Ejecución Financiera"], ascending=[False, True])
+            .head(5)
+            [["NOMBRE PROYECTO", "INSTITUCION EJECUTORA", "REGION O PROVINCIA", "% Ejecución Financiera", "Subejecución / Brecha"]]
+        )
+        st.markdown("**Proyectos críticos de baja ejecución**")
+        st.dataframe(top_underperformers, use_container_width=True, hide_index=True)
 
-tab1, tab2, tab3, tab4 = st.tabs(["Dashboard General", "Alertas de Desempeño", "Inversión Territorial", "Explorador y Exportación"])
+st.markdown("---")
 
-with tab1:
-    by_institution = (
-        filtered_df.groupby("INSTITUCION EJECUTORA", as_index=False)
-        .agg(Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"), Ejecucion=("TOTAL EJECUCION", "sum"))
+# Tablero principal con análisis profundo
+tabs = st.tabs(["Dashboard General", "Alertas de Desempeño", "Inversión Territorial", "Explorador y Exportación"])
+
+with tabs[0]:
+    st.markdown("### Rendimiento por período y financiamiento")
+    period_summary = (
+        filtered_df.groupby("PERIODO", as_index=False)
+        .agg(
+            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
+            Ejecucion=("TOTAL EJECUCION", "sum"),
+            Proyectos=("SNIP", "nunique"),
+            EjecucionMedia=("% Ejecución Financiera", "mean"),
+        )
     )
-    fig_bar = px.bar(
-        by_institution,
-        x="INSTITUCION EJECUTORA",
+    line_fig = px.line(
+        period_summary,
+        x="PERIODO",
         y=["Presupuesto", "Ejecucion"],
-        barmode="group",
-        title="Presupuesto Vigente vs Ejecución por Institución Ejecutora",
+        markers=True,
+        title="Tendencia de Presupuesto y Ejecución por Año",
         template="plotly_white",
     )
-    fig_bar.update_layout(xaxis_tickangle=-35)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    line_fig.update_layout(yaxis_title="RD$", legend_title="Serie")
+    st.plotly_chart(line_fig, use_container_width=True)
+
+    st.markdown("### Composición del financiamiento por fuente")
+    source_summary = (
+        filtered_df[
+            [
+                "PRESUPUESTO VIGENTE FONDO GENERAL",
+                "PRESUPUESTO VIGENTE CREDITO EXTERNO",
+                "PRESUPUESTO VIGENTE DONACIONES",
+                "EJECUCION FONDO GENERAL",
+                "EJECUCION CREDITO EXTERNO",
+                "EJECUCION DONACIONES",
+            ]
+        ]
+        .sum()
+        .reset_index()
+        .rename(columns={"index": "Fuente", 0: "Monto"})
+    )
+    source_summary["Tipo"] = source_summary["Fuente"].apply(lambda v: "Presupuesto" if "PRESUPUESTO" in v else "Ejecución")
+    source_summary["Fuente"] = source_summary["Fuente"].str.replace("PRESUPUESTO VIGENTE ", "", regex=False).str.replace("EJECUCION ", "", regex=False)
+    bar_source = px.bar(
+        source_summary,
+        x="Monto",
+        y="Fuente",
+        color="Tipo",
+        orientation="h",
+        barmode="group",
+        title="Totales por Fuente de Financiamiento",
+        template="plotly_white",
+    )
+    st.plotly_chart(bar_source, use_container_width=True)
+
+    st.markdown("### Top 10 instituciones por volumen y eficiencia")
+    inst_perf = (
+        filtered_df.groupby("INSTITUCION EJECUTORA", as_index=False)
+        .agg(
+            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
+            Ejecucion=("TOTAL EJECUCION", "sum"),
+            EjecucionMedia=("% Ejecución Financiera", "mean"),
+        )
+        .sort_values("Presupuesto", ascending=False)
+        .head(10)
+    )
+    inst_perf["Eficiencia"] = inst_perf["EjecucionMedia"]
+    bar_inst = px.bar(
+        inst_perf,
+        x="Presupuesto",
+        y="INSTITUCION EJECUTORA",
+        orientation="h",
+        color="Eficiencia",
+        title="Top 10 Instituciones por Presupuesto y Eficiencia Financiera",
+        template="plotly_white",
+        color_continuous_scale="blues",
+    )
+    st.plotly_chart(bar_inst, use_container_width=True)
 
 with tab2:
+    st.markdown("### Rendimiento proyectado por proyecto")
     scatter = px.scatter(
         filtered_df,
         x="PORCENTAJE",
         y="% Ejecución Financiera",
-        color="PERIODO",
-        hover_data=["NOMBRE PROYECTO", "INSTITUCION EJECUTORA", "REGION O PROVINCIA"],
-        title="Relación entre Avance Físico y Ejecución Financiera",
+        size="TOTAL PRESUPUESTO VIGENTE",
+        color="REGION O PROVINCIA",
+        hover_name="NOMBRE PROYECTO",
+        hover_data={
+            "SNIP": True,
+            "INSTITUCION EJECUTORA": True,
+            "TOTAL PRESUPUESTO VIGENTE": ":,.0f",
+            "TOTAL EJECUCION": ":,.0f",
+        },
+        title="Proyectos: avance físico vs ejecución financiera",
         template="plotly_white",
     )
+    scatter.update_layout(xaxis_title="% Avance Físico", yaxis_title="% Ejecución Financiera")
     st.plotly_chart(scatter, use_container_width=True)
 
-    st.subheader("Top 15 proyectos con mayor brecha presupuestaria")
-    top_gap_table = (
-        filtered_df.assign(Brecha=filtered_df["Subejecución / Brecha"])
-        .sort_values("Brecha", ascending=False)
-        .head(15)[
-            [
-                "NOMBRE PROYECTO",
-                "SNIP",
-                "INSTITUCION EJECUTORA",
-                "REGION O PROVINCIA",
-                "TOTAL PRESUPUESTO VIGENTE",
-                "TOTAL EJECUCION",
-                "Subejecución / Brecha",
-                "% Ejecución Financiera",
-            ]
-        ]
+    st.markdown("### Proyectos con mayor brecha y baja ejecución")
+    alert_table = (
+        filtered_df.assign(
+            Brecha=filtered_df["Subejecución / Brecha"],
+            EjecucionFinanciera=filtered_df["% Ejecución Financiera"],
+        )
+        .query("EjecucionFinanciera < 70")
+        .sort_values(["Brecha", "EjecucionFinanciera"], ascending=[False, True])
+        .head(15)
+        [[
+            "NOMBRE PROYECTO",
+            "SNIP",
+            "INSTITUCION EJECUTORA",
+            "REGION O PROVINCIA",
+            "PRESUPUESTO VIGENTE FONDO GENERAL",
+            "PRESUPUESTO VIGENTE CREDITO EXTERNO",
+            "PRESUPUESTO VIGENTE DONACIONES",
+            "TOTAL PRESUPUESTO VIGENTE",
+            "TOTAL EJECUCION",
+            "% Ejecución Financiera",
+            "PORCENTAJE",
+            "Subejecución / Brecha",
+        ]]
     )
-    st.dataframe(top_gap_table, use_container_width=True, hide_index=True)
+    st.dataframe(alert_table, use_container_width=True, hide_index=True)
 
 with tab3:
+    st.markdown("### Inversión por región y por nivel estratégico")
     regional_investment = (
         filtered_df.groupby("REGION O PROVINCIA", as_index=False)
-        .agg(Inversión=("TOTAL PRESUPUESTO VIGENTE", "sum"))
-        .sort_values("Inversión", ascending=False)
+        .agg(
+            Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"),
+            Ejecucion=("TOTAL EJECUCION", "sum"),
+            Eficiencia=("% Ejecución Financiera", "mean"),
+        )
+        .sort_values("Presupuesto", ascending=False)
     )
     fig_region = px.bar(
         regional_investment,
-        x="Inversión",
+        x="Presupuesto",
         y="REGION O PROVINCIA",
         orientation="h",
-        color="REGION O PROVINCIA",
-        title="Inversión Total por Región o Provincia",
+        color="Eficiencia",
+        title="Inversión y eficiencia por Región/Provincia",
         template="plotly_white",
+        color_continuous_scale="viridis",
     )
-    fig_region.update_layout(showlegend=False)
     st.plotly_chart(fig_region, use_container_width=True)
 
+    st.markdown("### Alineación estratégica: ODS y Eje END")
     treemap_data = (
         filtered_df.groupby(["NOMBRE CORTO ODS", "EJE END"], as_index=False)
-        .agg(Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"))
+        .agg(Presupuesto=("TOTAL PRESUPUESTO VIGENTE", "sum"), Ejecucion=("TOTAL EJECUCION", "sum"))
     )
+    treemap_data["Eficiencia"] = treemap_data["Ejecucion"] / treemap_data["Presupuesto"] * 100
     fig_treemap = px.treemap(
         treemap_data,
         path=[px.Constant("ODS / EJE END"), "NOMBRE CORTO ODS", "EJE END"],
         values="Presupuesto",
-        title="Distribución del Presupuesto por ODS y Eje END",
+        color="Eficiencia",
+        color_continuous_scale="plasma",
+        title="Distribución del Presupuesto por ODS y Eje END con Eficiencia",
         template="plotly_white",
     )
     st.plotly_chart(fig_treemap, use_container_width=True)
 
-with tab4:
+with tabs[3]:
     st.subheader("Explorador abierto")
     search_text = st.text_input("Buscar por nombre de proyecto o SNIP")
     explorer_df = filtered_df.copy()
@@ -412,14 +507,16 @@ with tab4:
     explorer_df = explorer_df[
         [
             "PERIODO",
-            "NOMBRE PROYECTO",
             "SNIP",
+            "NOMBRE PROYECTO",
             "INSTITUCION EJECUTORA",
             "REGION O PROVINCIA",
             "NOMBRE CORTO ODS",
+            "EJE END",
             "TOTAL PRESUPUESTO VIGENTE",
             "TOTAL EJECUCION",
             "% Ejecución Financiera",
+            "PORCENTAJE",
             "Subejecución / Brecha",
         ]
     ]
